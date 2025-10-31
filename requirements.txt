@@ -1,0 +1,23 @@
+# Core Dependencies
+next==16.0.1
+react==19.2.0
+react-dom==19.2.0
+classnames==2.5.1
+
+# Development Dependencies
+typescript==5.0.0
+@types/react==19.0.0
+@types/react-dom==19.0.0
+@types/node==20.0.0
+
+# Styling
+tailwindcss==3.3.5
+postcss==8.4.31
+autoprefixer==10.4.16
+
+# Linting & Formatting
+eslint==9.0.0
+eslint-config-next==16.0.1
+
+# Build Tools
+babel-plugin-react-compiler==1.0.0
