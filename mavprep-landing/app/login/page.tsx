@@ -2,9 +2,11 @@
 
 import Link from "next/link";
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 
 export default function LoginPage() {
   const [showSignup, setShowSignup] = useState(false);
+  const router = useRouter();
 
   return (
     <div className="min-h-screen bg-black flex">
@@ -175,7 +177,10 @@ export default function LoginPage() {
                   </button>
 
                   {/* Guest Login */}
-                  <button className="w-full flex items-center justify-center gap-2 px-3 py-2 text-sm bg-black border border-gray-700 rounded-lg text-white hover:border-primary hover:bg-gray-800 transition-all group">
+                  <button
+                    onClick={() => router.push("/home")}
+                    className="w-full flex items-center justify-center gap-2 px-3 py-2 text-sm bg-black border border-gray-700 rounded-lg text-white hover:border-primary hover:bg-gray-800 transition-all group"
+                  >
                     <svg
                       className="w-4 h-4"
                       fill="none"
