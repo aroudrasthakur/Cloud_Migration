@@ -34,29 +34,46 @@ MavPrep is a comprehensive educational platform designed to help students excel 
 
 ## ✨ Features
 
-### 🔐 Authentication
+### 🔐 Authentication & User Management
 
 - Email-based sign up/sign in with AWS Cognito
+- Custom username system with uniqueness validation
 - Email verification with 6-digit codes
 - Password reset functionality
+- User settings page for profile management
 - Secure JWT token management
 
 ### 💬 Text Channels
 
 - Real-time messaging with Socket.IO
+- **Message replies** - Reply to specific messages with quoted context
+- **Edit & delete messages** - Modify or remove your own messages
+- **Message grouping** - Messages from the same user within 5 minutes are stacked
 - Emoji picker for expressive communication
 - Message history persistence with DynamoDB
 - Public and private channels with password protection
 - Channel-specific chat rooms for different courses
+- Course information displayed on each channel
 
 ### 🎙️ Voice Channels
 
 - Live audio streaming with WebRTC
+- **Video calling** - Toggle camera on/off during calls
 - Mute/Unmute functionality
 - Deafen/Undeafen for audio output control
+- Minimizable voice call view - browse/chat while in a call
 - Visual participant avatars with speaking indicators
+- Participant list in sidebar when call is minimized
 - Audio cues for join, leave, mute, and deafen actions
 - Discord-like voice call interface
+- Camera error handling with user-friendly messages
+
+### 👤 User Profile
+
+- Customizable username (unique across platform)
+- Profile description
+- Password change functionality
+- Profile dropdown with quick access to settings
 
 ### 📚 Study Tools (Planned)
 
@@ -74,6 +91,8 @@ MavPrep is a comprehensive educational platform designed to help students excel 
 - Responsive design for all devices
 - Neon accent styling with smooth animations
 - Real-time connection status indicators
+- Independent scrolling for sidebar and main content
+- Inline confirmation dialogs for destructive actions
 
 ---
 
@@ -88,6 +107,7 @@ MavPrep is a comprehensive educational platform designed to help students excel 
 | **TypeScript**       | 5.0     | Type-safe development           |
 | **Tailwind CSS**     | 4.0     | Utility-first styling           |
 | **Socket.IO Client** | 4.8     | Real-time communication         |
+| **SimplePeer**       | 9.x     | WebRTC peer connections         |
 
 ### Backend & Infrastructure
 
@@ -95,9 +115,9 @@ MavPrep is a comprehensive educational platform designed to help students excel 
 | -------------------- | --------------------------------------- |
 | **AWS Cognito**      | User authentication & management        |
 | **AWS Amplify**      | Hosting & CI/CD deployment              |
-| **AWS DynamoDB**     | Chat history & channel data storage     |
+| **AWS DynamoDB**     | Chat history, channels & user data      |
 | **Socket.IO Server** | WebSocket server for real-time features |
-| **WebRTC**           | Peer-to-peer voice communication        |
+| **WebRTC**           | Peer-to-peer voice/video communication  |
 
 ### Design System
 
@@ -120,14 +140,21 @@ Cloud_Migration/
 │   │   │   └── page.tsx       # Dashboard with channels & voice
 │   │   ├── login/
 │   │   │   └── page.tsx       # Authentication pages
+│   │   ├── settings/
+│   │   │   └── page.tsx       # User profile settings
 │   │   ├── layout.tsx         # Root layout with providers
 │   │   ├── page.tsx           # Landing page
 │   │   └── globals.css        # Global styles
 │   ├── lib/
-│   │   └── amplify-provider.tsx  # AWS Amplify configuration
+│   │   ├── amplify-provider.tsx  # AWS Amplify configuration
+│   │   └── dynamodb.ts           # DynamoDB client & operations
 │   ├── pages/
 │   │   └── api/
-│   │       └── webrtc-signaling.ts  # Socket.IO server
+│   │       ├── webrtc-signaling.ts  # Socket.IO server
+│   │       ├── channels/            # Channel CRUD endpoints
+│   │       ├── messages/            # Message CRUD endpoints
+│   │       ├── check-username.ts    # Username availability
+│   │       └── seed-channels.ts     # Initial data seeding
 │   ├── public/                # Static assets
 │   ├── package.json           # Dependencies
 │   └── tsconfig.json          # TypeScript config
@@ -170,13 +197,16 @@ Cloud_Migration/
    Create a `.env.local` file in the `mavprep-landing` directory:
 
    ```env
-   # AWS Cognito Configuration
-   NEXT_PUBLIC_COGNITO_USER_POOL_ID=us-east-1_XXXXXXXXX
+   # AWS Cognito Configuration (Client-side)
+   NEXT_PUBLIC_COGNITO_USER_POOL_ID=us-east-2_XXXXXXXXX
    NEXT_PUBLIC_COGNITO_CLIENT_ID=xxxxxxxxxxxxxxxxxxxxxxxxxx
-   NEXT_PUBLIC_AWS_REGION=us-east-1
+   NEXT_PUBLIC_AWS_REGION=us-east-2
 
-   # Optional: DynamoDB (for production)
-   NEXT_PUBLIC_DYNAMODB_TABLE_NAME=MavPrepData
+   # AWS DynamoDB Configuration (Server-side)
+   AWS_REGION=us-east-2
+   AWS_ACCESS_KEY_ID=your_access_key
+   AWS_SECRET_ACCESS_KEY=your_secret_key
+   DYNAMODB_TABLE_NAME=MavPrepData
    ```
 
 4. **Run the development server**
@@ -221,22 +251,53 @@ npm start
 Table: MavPrepData
 ├── Partition Key: PK (String)
 ├── Sort Key: SK (String)
-└── GSI: userId-timestamp-index
+└── GSI: GSI1 (GSI1PK, GSI1SK)
 
 Data Patterns:
 ┌─────────────────────────────────────────────────────────┐
 │ Channels                                                │
 │ PK: "CHANNEL#c-1"  SK: "METADATA"                      │
-│ Data: { name, type, privacy, createdBy, createdAt }    │
+│ Data: { name, type, privacy, createdBy, course }       │
 ├─────────────────────────────────────────────────────────┤
 │ Messages                                                │
 │ PK: "CHANNEL#c-1"  SK: "MSG#2024-01-15T10:30:00Z#uuid" │
-│ Data: { userId, userName, content, reactions }          │
+│ Data: { userId, userName, content, replyTo, reactions } │
+├─────────────────────────────────────────────────────────┤
+│ Username Reservations                                   │
+│ PK: "USERNAME#johndoe"  SK: "METADATA"                 │
+│ Data: { userId, reservedAt }                           │
 ├─────────────────────────────────────────────────────────┤
 │ Voice Participants                                      │
 │ PK: "VOICE#v-1"    SK: "USER#user-123"                 │
 │ Data: { joinedAt, isMuted, isDeafened }                │
 └─────────────────────────────────────────────────────────┘
+```
+
+### Creating the DynamoDB Table
+
+```bash
+aws dynamodb create-table \
+  --table-name MavPrepData \
+  --attribute-definitions \
+    AttributeName=PK,AttributeType=S \
+    AttributeName=SK,AttributeType=S \
+    AttributeName=GSI1PK,AttributeType=S \
+    AttributeName=GSI1SK,AttributeType=S \
+  --key-schema \
+    AttributeName=PK,KeyType=HASH \
+    AttributeName=SK,KeyType=RANGE \
+  --global-secondary-indexes \
+    '[{
+      "IndexName": "GSI1",
+      "KeySchema": [
+        {"AttributeName": "GSI1PK", "KeyType": "HASH"},
+        {"AttributeName": "GSI1SK", "KeyType": "RANGE"}
+      ],
+      "Projection": {"ProjectionType": "ALL"},
+      "ProvisionedThroughput": {"ReadCapacityUnits": 5, "WriteCapacityUnits": 5}
+    }]' \
+  --provisioned-throughput ReadCapacityUnits=5,WriteCapacityUnits=5 \
+  --region us-east-2
 ```
 
 ### Amplify Deployment
@@ -276,25 +337,31 @@ Data Patterns:
 - [x] AWS Cognito integration
 - [x] Password reset functionality
 - [x] Email verification flow
+- [x] Username system with uniqueness validation
 
 ### Phase 2: Communication ✅ COMPLETE
 
 - [x] Text channels with real-time messaging
 - [x] Voice channels with WebRTC
+- [x] Video calling with camera toggle
 - [x] Mute/Deafen/Leave controls
 - [x] Emoji picker for messages
 - [x] Audio cues for voice actions
 - [x] Socket.IO signaling server
+- [x] Minimizable voice call view
 
-### Phase 3: Data Persistence 🔄 IN PROGRESS
+### Phase 3: Data Persistence ✅ COMPLETE
 
-- [ ] DynamoDB integration for messages
-- [ ] Channel data persistence
-- [ ] User profile storage
-- [ ] Message history loading
-- [ ] Real-time sync across clients
+- [x] DynamoDB integration for messages
+- [x] Channel data persistence
+- [x] User profile storage (username reservations)
+- [x] Message history loading
+- [x] Message editing and deletion
+- [x] Message replies with quoted context
+- [x] Message grouping (same user within 5 minutes)
+- [x] User settings page
 
-### Phase 4: Study Tools
+### Phase 4: Study Tools 🔄 NEXT
 
 - [ ] Practice test engine
 - [ ] Question bank and categorization
@@ -322,18 +389,21 @@ Data Patterns:
 
 ## 📊 Current Status
 
-- **Phase:** Phase 3 - Data Persistence
-- **Current Focus:** DynamoDB integration & message persistence
+- **Phase:** Phase 4 - Study Tools (Starting)
+- **Current Focus:** Practice test engine & question bank
 - **Communication:** Discord #{{project-channel}}
 
 ### Recent Updates
 
-- ✅ Text channels with emoji support
-- ✅ Voice channels with WebRTC audio
-- ✅ AWS Cognito authentication
-- ✅ Password reset flow
-- ✅ Discord-like UI with dark theme
-- ✅ Audio cues for voice actions
+- ✅ Message reply feature with quoted context
+- ✅ Message editing and deletion
+- ✅ Message grouping for same-user messages
+- ✅ Video calling with camera toggle
+- ✅ Minimizable voice call view
+- ✅ User settings page with profile management
+- ✅ DynamoDB integration complete
+- ✅ Username uniqueness validation
+- ✅ Inline confirmation dialogs
 
 ---
 
@@ -417,6 +487,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
   - AWS for cloud infrastructure
   - Socket.IO for real-time communication
   - Tailwind CSS for styling
+  - SimplePeer for WebRTC
 - **UTA students** for feedback and feature suggestions
 
 ---

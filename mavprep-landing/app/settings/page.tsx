@@ -10,7 +10,10 @@ export default function SettingsPage() {
     userId: string;
     email: string;
     currentUsername: string;
+    currentDescription: string;
   } | null>(null);
+
+  const DESCRIPTION_MAX_LENGTH = 50;
 
   // Form states
   const [username, setUsername] = useState("");
@@ -39,6 +42,7 @@ export default function SettingsPage() {
           userId: user.userId,
           email: attributes.email || "",
           currentUsername: attributes.preferred_username || "",
+          currentDescription: attributes["custom:description"] || "",
         });
       } catch (error) {
         console.error("Error fetching user info:", error);
@@ -167,8 +171,14 @@ export default function SettingsPage() {
         attributes.preferred_username = newUsername;
       }
 
-      if (description.trim()) {
-        attributes["custom:description"] = description.trim();
+      const newDescription = description.trim();
+      if (newDescription) {
+        if (newDescription.length > DESCRIPTION_MAX_LENGTH) {
+          setError(`Description must be ${DESCRIPTION_MAX_LENGTH} characters or less.`);
+          setIsLoading(false);
+          return;
+        }
+        attributes["custom:description"] = newDescription;
       }
 
       if (Object.keys(attributes).length === 0) {
@@ -182,11 +192,29 @@ export default function SettingsPage() {
         userAttributes: attributes,
       });
 
+      // Update description in DynamoDB if changed
+      if (newDescription && currentUserInfo) {
+        try {
+          await fetch("/api/update-profile", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              username: currentUserInfo.currentUsername || newUsername,
+              description: newDescription,
+            }),
+          });
+        } catch (dbError) {
+          console.error("Failed to update description in DynamoDB:", dbError);
+          // Don't fail the whole update if DynamoDB fails - Cognito is the source of truth
+        }
+      }
+
       // Update local state
-      if (newUsername && currentUserInfo) {
+      if (currentUserInfo) {
         setCurrentUserInfo({
           ...currentUserInfo,
-          currentUsername: newUsername,
+          currentUsername: newUsername || currentUserInfo.currentUsername,
+          currentDescription: newDescription || currentUserInfo.currentDescription,
         });
       }
 
@@ -398,17 +426,44 @@ export default function SettingsPage() {
               <div>
                 <label className="block text-sm text-gray-400 mb-2">
                   Description
+                  {currentUserInfo?.currentDescription && (
+                    <span className="text-gray-500 ml-2">
+                      (current: <span className="text-gray-300">&quot;{currentUserInfo.currentDescription}&quot;</span>)
+                    </span>
+                  )}
                 </label>
-                <textarea
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                  placeholder="Tell us about yourself..."
-                  rows={4}
-                  className="w-full px-4 py-3 bg-black border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-primary transition-colors resize-none"
-                />
-                <p className="text-xs text-gray-500 mt-1">
-                  A short bio about yourself (optional).
-                </p>
+                <div className="relative">
+                  <textarea
+                    value={description}
+                    onChange={(e) => {
+                      if (e.target.value.length <= DESCRIPTION_MAX_LENGTH) {
+                        setDescription(e.target.value);
+                      }
+                    }}
+                    placeholder="Tell us about yourself..."
+                    rows={2}
+                    maxLength={DESCRIPTION_MAX_LENGTH}
+                    className={`w-full px-4 py-3 bg-black border rounded-lg text-white placeholder-gray-500 focus:outline-none transition-colors resize-none ${
+                      description.length >= DESCRIPTION_MAX_LENGTH
+                        ? "border-yellow-500 focus:border-yellow-500"
+                        : "border-gray-700 focus:border-primary"
+                    }`}
+                  />
+                </div>
+                <div className="flex justify-between items-center mt-1">
+                  <p className="text-xs text-gray-500">
+                    A short bio about yourself (optional).
+                  </p>
+                  <p className={`text-xs ${
+                    description.length >= DESCRIPTION_MAX_LENGTH
+                      ? "text-yellow-400"
+                      : description.length >= DESCRIPTION_MAX_LENGTH - 10
+                      ? "text-gray-400"
+                      : "text-gray-500"
+                  }`}>
+                    {description.length}/{DESCRIPTION_MAX_LENGTH}
+                  </p>
+                </div>
               </div>
 
               <button

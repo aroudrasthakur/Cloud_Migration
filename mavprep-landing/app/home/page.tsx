@@ -176,6 +176,25 @@ export default function HomePage() {
   const [replyingTo, setReplyingTo] = useState<Message | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
+  // User search state
+  const [userSearchQuery, setUserSearchQuery] = useState("");
+  const [userSearchResults, setUserSearchResults] = useState<
+    { username: string; email: string; description?: string; createdAt?: string }[]
+  >([]);
+  const [isSearchingUsers, setIsSearchingUsers] = useState(false);
+  const [showUserSearchResults, setShowUserSearchResults] = useState(false);
+  const userSearchRef = useRef<HTMLDivElement>(null);
+  const userSearchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // User profile modal state
+  const [selectedUserProfile, setSelectedUserProfile] = useState<{
+    username: string;
+    email: string;
+    description?: string;
+    createdAt?: string;
+  } | null>(null);
+  const [isLoadingProfile, setIsLoadingProfile] = useState(false);
+
   // Voice call state
   const [activeCall, setActiveCall] = useState<null | {
     channelId: string;
@@ -383,23 +402,23 @@ export default function HomePage() {
           .then(() => {
             const socket = io({
               path: "/api/webrtc-signaling",
-              transports: ["websocket", "polling"],
-              reconnection: true,
+          transports: ["websocket", "polling"],
+          reconnection: true,
               reconnectionAttempts: 5,
               reconnectionDelay: 1000,
-            });
+        });
 
-            if (!socket) {
+        if (!socket) {
               setCallError(
                 "Socket.IO not available. Please check server setup."
               );
-              setConnectionStatus("Error");
-              return;
-            }
-            socketRef.current = socket;
+          setConnectionStatus("Error");
+          return;
+        }
+        socketRef.current = socket;
 
-            socket.on("connect", () => {
-              setConnectionStatus("Joining room...");
+        socket.on("connect", () => {
+          setConnectionStatus("Joining room...");
               socket.emit("join-room", {
                 roomId: activeCall.channelId,
                 userId,
@@ -409,7 +428,7 @@ export default function HomePage() {
             socket.on(
               "room-joined",
               ({ memberCount }: { memberCount: number }) => {
-                setConnectionStatus(`Connected (${memberCount} in room)`);
+          setConnectionStatus(`Connected (${memberCount} in room)`);
                 playJoinSound(); // Play join sound
                 // Create mock participants for demo
                 const mockParticipants = Array(memberCount - 1)
@@ -449,23 +468,23 @@ export default function HomePage() {
                 setParticipants((prev) =>
                   prev.filter((p) => p.id !== remoteId)
                 );
-                if (peersRef.current[remoteId]) {
-                  peersRef.current[remoteId].destroy?.();
-                  delete peersRef.current[remoteId];
-                }
-                removeRemoteAudio(remoteId);
+          if (peersRef.current[remoteId]) {
+            peersRef.current[remoteId].destroy?.();
+            delete peersRef.current[remoteId];
+          }
+          removeRemoteAudio(remoteId);
               }
             );
 
             socket.on("connect_error", () => {
-              setConnectionStatus("Connection error");
-              setCallError("Failed to connect to voice server");
-            });
+          setConnectionStatus("Connection error");
+          setCallError("Failed to connect to voice server");
+        });
 
-            socket.on("error", ({ message }: { message: string }) => {
-              setCallError(message);
-            });
-          })
+        socket.on("error", ({ message }: { message: string }) => {
+          setCallError(message);
+        });
+      })
           .catch((fetchErr) => {
             console.error("Failed to initialize Socket.IO server:", fetchErr);
             setCallError("Failed to initialize voice server.");
@@ -530,9 +549,9 @@ export default function HomePage() {
       // When deafening, also mute (like Discord)
       if (newDeafened && !isMuted) {
         // Call mute without sound since deafen sound will play
-        if (localStreamRef.current) {
-          const audioTrack = localStreamRef.current.getAudioTracks()[0];
-          if (audioTrack) {
+    if (localStreamRef.current) {
+      const audioTrack = localStreamRef.current.getAudioTracks()[0];
+      if (audioTrack) {
             audioTrack.enabled = false;
             setIsMuted(true);
           }
@@ -1005,6 +1024,111 @@ export default function HomePage() {
     setReplyingTo(null);
   }
 
+  // User search functions
+  async function searchUsers(query: string) {
+    if (!query.trim() || query.trim().length < 2) {
+      setUserSearchResults([]);
+      setShowUserSearchResults(false);
+      return;
+    }
+
+    setIsSearchingUsers(true);
+    try {
+      const response = await fetch(
+        `/api/search-users?q=${encodeURIComponent(query.trim())}`
+      );
+      if (response.ok) {
+        const data = await response.json();
+        setUserSearchResults(data.users || []);
+        setShowUserSearchResults(true);
+      }
+    } catch (error) {
+      console.error("Error searching users:", error);
+    } finally {
+      setIsSearchingUsers(false);
+    }
+  }
+
+  function handleUserSearchChange(query: string) {
+    setUserSearchQuery(query);
+
+    if (userSearchTimeoutRef.current) {
+      clearTimeout(userSearchTimeoutRef.current);
+    }
+
+    userSearchTimeoutRef.current = setTimeout(() => {
+      searchUsers(query);
+    }, 300);
+  }
+
+  async function openUserProfile(user: {
+    username: string;
+    email: string;
+    description?: string;
+    createdAt?: string;
+  }) {
+    setShowUserSearchResults(false);
+    setUserSearchQuery("");
+    setIsLoadingProfile(true);
+
+    try {
+      // Fetch full profile from API
+      const response = await fetch(
+        `/api/get-user-profile?username=${encodeURIComponent(user.username)}`
+      );
+      if (response.ok) {
+        const data = await response.json();
+        setSelectedUserProfile(data.profile);
+      } else {
+        // Fallback to search result data
+        setSelectedUserProfile(user);
+      }
+    } catch (error) {
+      console.error("Error fetching user profile:", error);
+      setSelectedUserProfile(user);
+    } finally {
+      setIsLoadingProfile(false);
+    }
+  }
+
+  function closeUserProfile() {
+    setSelectedUserProfile(null);
+  }
+
+  function formatJoinDate(dateString?: string): string {
+    if (!dateString) return "Unknown";
+    try {
+      const date = new Date(dateString);
+      return date.toLocaleDateString("en-US", {
+        month: "long",
+        day: "numeric",
+        year: "numeric",
+      });
+    } catch {
+      return "Unknown";
+    }
+  }
+
+  // Close search results when clicking outside
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (
+        userSearchRef.current &&
+        !userSearchRef.current.contains(event.target as Node)
+      ) {
+        setShowUserSearchResults(false);
+      }
+    }
+
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+      if (userSearchTimeoutRef.current) {
+        clearTimeout(userSearchTimeoutRef.current);
+      }
+    };
+  }, []);
+
   function formatTimestamp(timestamp: Date | string): string {
     const date =
       typeof timestamp === "string" ? new Date(timestamp) : timestamp;
@@ -1052,8 +1176,8 @@ export default function HomePage() {
         {/* Left Sidebar - Discord-like channels */}
         <aside className="w-72 border-r border-gray-800 h-screen flex flex-col bg-gray-900/30">
           <div className="flex-1 overflow-y-auto px-4 py-6">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-semibold neon-text-glow">MavPrep</h2>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-semibold neon-text-glow">MavPrep</h2>
               {/* Profile Icon with Dropdown */}
               <div className="relative" ref={profileDropdownRef}>
                 <button
@@ -1158,185 +1282,185 @@ export default function HomePage() {
                   </div>
                 )}
               </div>
-            </div>
+          </div>
 
-            <div className="mb-4 flex items-center gap-2">
-              <input
+          <div className="mb-4 flex items-center gap-2">
+            <input
                 suppressHydrationWarning
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search channels..."
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search channels..."
                 className="flex-1 h-10 px-3 bg-black border border-gray-700 rounded-lg placeholder-gray-500 text-sm focus:outline-none focus:border-primary transition-colors"
-              />
-              <button
+            />
+            <button
                 suppressHydrationWarning
-                onClick={() => setShowAddModal(true)}
-                aria-label="Create channel"
+              onClick={() => setShowAddModal(true)}
+              aria-label="Create channel"
                 className="w-10 h-10 flex-shrink-0 rounded-lg bg-primary text-black flex items-center justify-center text-xl font-bold hover:bg-accent transition-colors"
-              >
-                +
-              </button>
-            </div>
+            >
+              +
+            </button>
+          </div>
 
-            {showAddModal && (
-              <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
-                <div className="w-full max-w-md p-6 bg-gradient-to-br from-[#041022] via-[#00131a] to-[#001f2b] border border-primary/30 rounded-xl shadow-[0_20px_60px_rgba(0,217,255,0.08)]">
-                  <h3 className="text-xl font-semibold mb-6">Create Channel</h3>
+          {showAddModal && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
+              <div className="w-full max-w-md p-6 bg-gradient-to-br from-[#041022] via-[#00131a] to-[#001f2b] border border-primary/30 rounded-xl shadow-[0_20px_60px_rgba(0,217,255,0.08)]">
+                <h3 className="text-xl font-semibold mb-6">Create Channel</h3>
 
-                  <div className="space-y-4">
-                    <div>
-                      <label className="block text-sm text-gray-400 mb-2">
-                        Type
-                      </label>
-                      <div className="flex gap-2">
-                        <button
-                          onClick={() => setNewType("text")}
-                          className={`flex-1 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                            newType === "text"
-                              ? "bg-primary text-black"
-                              : "bg-black border border-gray-700 text-gray-200 hover:border-gray-600"
-                          }`}
-                        >
-                          Text
-                        </button>
-                        <button
-                          onClick={() => setNewType("voice")}
-                          className={`flex-1 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                            newType === "voice"
-                              ? "bg-primary text-black"
-                              : "bg-black border border-gray-700 text-gray-200 hover:border-gray-600"
-                          }`}
-                        >
-                          Voice
-                        </button>
-                      </div>
-                    </div>
-
-                    <div>
-                      <label className="block text-sm text-gray-400 mb-2">
-                        Channel Name
-                      </label>
-                      <input
-                        value={newName}
-                        onChange={(e) => setNewName(e.target.value)}
-                        className="w-full px-3 py-2 bg-black border border-gray-700 rounded-lg text-sm focus:outline-none focus:border-primary transition-colors"
-                        placeholder="e.g. Final Review"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-sm text-gray-400 mb-2">
-                        Course
-                      </label>
-                      <input
-                        value={newCourse}
-                        onChange={(e) => setNewCourse(e.target.value)}
-                        className="w-full px-3 py-2 bg-black border border-gray-700 rounded-lg text-sm focus:outline-none focus:border-primary transition-colors"
-                        placeholder="e.g. CSE 2312"
-                      />
-                    </div>
-
-                    <div className="flex items-start gap-4">
-                      <div className="flex-1">
-                        <label className="block text-sm text-gray-400 mb-2">
-                          Visibility
-                        </label>
-                        <select
-                          value={privacy}
-                          onChange={(e) =>
-                            setPrivacy(e.target.value as "public" | "private")
-                          }
-                          className="w-full px-3 py-2 bg-black border border-gray-700 rounded-lg text-sm focus:outline-none focus:border-primary transition-colors"
-                        >
-                          <option value="public">Public</option>
-                          <option value="private">Private</option>
-                        </select>
-                      </div>
-
-                      <div className="flex-1">
-                        <label className="block text-sm text-gray-400 mb-2">
-                          Max Members
-                        </label>
-                        <div className="flex items-center bg-black border border-gray-700 rounded-lg overflow-hidden">
-                          <button
-                            onClick={() =>
-                              setMaxMembers((m) => Math.max(1, m - 1))
-                            }
-                            className="px-3 py-2 text-sm text-gray-300 hover:bg-gray-800 transition-colors"
-                            aria-label="decrease"
-                          >
-                            −
-                          </button>
-                          <div className="px-3 py-2 text-sm flex-1 text-center border-x border-gray-700">
-                            {maxMembers}
-                          </div>
-                          <button
-                            onClick={() =>
-                              setMaxMembers((m) => Math.min(10, m + 1))
-                            }
-                            className="px-3 py-2 text-sm text-gray-300 hover:bg-gray-800 transition-colors"
-                            aria-label="increase"
-                          >
-                            +
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-
-                    {privacy === "private" && (
-                      <div>
-                        <label className="block text-sm text-gray-400 mb-2">
-                          Password
-                        </label>
-                        <input
-                          value={password}
-                          onChange={(e) => setPassword(e.target.value)}
-                          type="password"
-                          className="w-full px-3 py-2 bg-black border border-gray-700 rounded-lg text-sm focus:outline-none focus:border-primary transition-colors"
-                          placeholder="Enter a password"
-                        />
-                      </div>
-                    )}
-
-                    {formError && (
-                      <div className="text-sm text-red-400 bg-red-400/10 border border-red-400/20 rounded-lg px-3 py-2">
-                        {formError}
-                      </div>
-                    )}
-
-                    <div className="mt-6 flex justify-end gap-3">
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm text-gray-400 mb-2">
+                      Type
+                    </label>
+                    <div className="flex gap-2">
                       <button
-                        onClick={() => {
-                          setShowAddModal(false);
-                          resetForm();
-                        }}
-                        className="px-4 py-2 rounded-lg bg-gray-800 text-sm font-medium hover:bg-gray-700 transition-colors"
+                        onClick={() => setNewType("text")}
+                        className={`flex-1 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                          newType === "text"
+                            ? "bg-primary text-black"
+                            : "bg-black border border-gray-700 text-gray-200 hover:border-gray-600"
+                        }`}
                       >
-                        Cancel
+                        Text
                       </button>
                       <button
-                        onClick={createChannel}
-                        className="px-4 py-2 rounded-lg bg-primary text-black text-sm font-medium hover:bg-accent transition-colors"
+                        onClick={() => setNewType("voice")}
+                        className={`flex-1 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                          newType === "voice"
+                            ? "bg-primary text-black"
+                            : "bg-black border border-gray-700 text-gray-200 hover:border-gray-600"
+                        }`}
                       >
-                        Create
+                        Voice
                       </button>
                     </div>
                   </div>
+
+                  <div>
+                    <label className="block text-sm text-gray-400 mb-2">
+                      Channel Name
+                    </label>
+                    <input
+                      value={newName}
+                      onChange={(e) => setNewName(e.target.value)}
+                      className="w-full px-3 py-2 bg-black border border-gray-700 rounded-lg text-sm focus:outline-none focus:border-primary transition-colors"
+                      placeholder="e.g. Final Review"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm text-gray-400 mb-2">
+                      Course
+                    </label>
+                    <input
+                      value={newCourse}
+                      onChange={(e) => setNewCourse(e.target.value)}
+                      className="w-full px-3 py-2 bg-black border border-gray-700 rounded-lg text-sm focus:outline-none focus:border-primary transition-colors"
+                      placeholder="e.g. CSE 2312"
+                    />
+                  </div>
+
+                  <div className="flex items-start gap-4">
+                    <div className="flex-1">
+                      <label className="block text-sm text-gray-400 mb-2">
+                        Visibility
+                      </label>
+                      <select
+                        value={privacy}
+                        onChange={(e) =>
+                          setPrivacy(e.target.value as "public" | "private")
+                        }
+                        className="w-full px-3 py-2 bg-black border border-gray-700 rounded-lg text-sm focus:outline-none focus:border-primary transition-colors"
+                      >
+                        <option value="public">Public</option>
+                        <option value="private">Private</option>
+                      </select>
+                    </div>
+
+                    <div className="flex-1">
+                      <label className="block text-sm text-gray-400 mb-2">
+                        Max Members
+                      </label>
+                      <div className="flex items-center bg-black border border-gray-700 rounded-lg overflow-hidden">
+                        <button
+                          onClick={() =>
+                            setMaxMembers((m) => Math.max(1, m - 1))
+                          }
+                          className="px-3 py-2 text-sm text-gray-300 hover:bg-gray-800 transition-colors"
+                          aria-label="decrease"
+                        >
+                          −
+                        </button>
+                        <div className="px-3 py-2 text-sm flex-1 text-center border-x border-gray-700">
+                          {maxMembers}
+                        </div>
+                        <button
+                          onClick={() =>
+                            setMaxMembers((m) => Math.min(10, m + 1))
+                          }
+                          className="px-3 py-2 text-sm text-gray-300 hover:bg-gray-800 transition-colors"
+                          aria-label="increase"
+                        >
+                          +
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {privacy === "private" && (
+                    <div>
+                      <label className="block text-sm text-gray-400 mb-2">
+                        Password
+                      </label>
+                      <input
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        type="password"
+                        className="w-full px-3 py-2 bg-black border border-gray-700 rounded-lg text-sm focus:outline-none focus:border-primary transition-colors"
+                        placeholder="Enter a password"
+                      />
+                    </div>
+                  )}
+
+                  {formError && (
+                    <div className="text-sm text-red-400 bg-red-400/10 border border-red-400/20 rounded-lg px-3 py-2">
+                      {formError}
+                    </div>
+                  )}
+
+                  <div className="mt-6 flex justify-end gap-3">
+                    <button
+                      onClick={() => {
+                        setShowAddModal(false);
+                        resetForm();
+                      }}
+                      className="px-4 py-2 rounded-lg bg-gray-800 text-sm font-medium hover:bg-gray-700 transition-colors"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={createChannel}
+                      className="px-4 py-2 rounded-lg bg-primary text-black text-sm font-medium hover:bg-accent transition-colors"
+                    >
+                      Create
+                    </button>
+                  </div>
                 </div>
               </div>
-            )}
+            </div>
+          )}
 
-            <nav className="space-y-4">
-              <div>
-                <h3 className="text-xs text-gray-400 uppercase tracking-wide mb-2">
-                  Text Channels
-                </h3>
-                <ul className="space-y-1">
-                  {filtered
-                    .filter((c) => c.type === "text")
-                    .map((ch) => (
-                      <li
-                        key={ch.id}
+          <nav className="space-y-4">
+            <div>
+              <h3 className="text-xs text-gray-400 uppercase tracking-wide mb-2">
+                Text Channels
+              </h3>
+              <ul className="space-y-1">
+                {filtered
+                  .filter((c) => c.type === "text")
+                  .map((ch) => (
+                    <li
+                      key={ch.id}
                         onClick={() => openTextChannel(ch)}
                         className={`flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer transition-colors ${
                           activeTextChannel?.id === ch.id
@@ -1362,31 +1486,31 @@ export default function HomePage() {
                         >
                           {ch.name}
                         </span>
-                        {ch.privacy === "private" && (
+                      {ch.privacy === "private" && (
                           <span className="text-xs text-gray-500 ml-auto">
                             🔒
                           </span>
-                        )}
-                      </li>
-                    ))}
-                </ul>
-              </div>
+                      )}
+                    </li>
+                  ))}
+              </ul>
+            </div>
 
-              <div>
-                <h3 className="text-xs text-gray-400 uppercase tracking-wide mb-2">
-                  Voice Channels
-                </h3>
-                <ul className="space-y-1">
-                  {filtered
-                    .filter((c) => c.type === "voice")
-                    .map((ch) => (
+            <div>
+              <h3 className="text-xs text-gray-400 uppercase tracking-wide mb-2">
+                Voice Channels
+              </h3>
+              <ul className="space-y-1">
+                {filtered
+                  .filter((c) => c.type === "voice")
+                  .map((ch) => (
                       <div key={ch.id}>
-                        <li
-                          className={`flex items-center gap-2 px-2 py-1 rounded-md hover:bg-gray-800/50 cursor-pointer ${
-                            inCall && activeCall?.channelId === ch.id
-                              ? "bg-primary/20 border-l-2 border-primary"
-                              : ""
-                          }`}
+                    <li
+                      className={`flex items-center gap-2 px-2 py-1 rounded-md hover:bg-gray-800/50 cursor-pointer ${
+                        inCall && activeCall?.channelId === ch.id
+                          ? "bg-primary/20 border-l-2 border-primary"
+                          : ""
+                      }`}
                           onClick={() => {
                             if (inCall && activeCall?.channelId === ch.id) {
                               // Toggle voice call view if clicking on current call channel
@@ -1395,13 +1519,13 @@ export default function HomePage() {
                               handleJoinVoiceChannel(ch);
                             }
                           }}
-                        >
-                          <span className="text-accent">♪</span>
+                    >
+                      <span className="text-accent">♪</span>
                           <span className="text-sm text-gray-200">
                             {ch.name}
                           </span>
-                          {ch.privacy === "private" && (
-                            <span className="text-xs text-gray-500">🔒</span>
+                      {ch.privacy === "private" && (
+                        <span className="text-xs text-gray-500">🔒</span>
                           )}
                           {inCall && activeCall?.channelId === ch.id && (
                             <span className="ml-auto text-xs text-green-400">
@@ -1435,16 +1559,16 @@ export default function HomePage() {
                                   </span>
                                   {p.isMuted && (
                                     <span className="text-red-400">🔇</span>
-                                  )}
-                                </li>
+                      )}
+                    </li>
                               ))}
                             </ul>
                           )}
                       </div>
-                    ))}
-                </ul>
-              </div>
-            </nav>
+                  ))}
+              </ul>
+            </div>
+          </nav>
           </div>
 
           {/* Active Call Indicator - Fixed at bottom */}
@@ -1478,26 +1602,26 @@ export default function HomePage() {
                 <div className="text-sm font-medium mb-2">
                   {activeCall.name}
                 </div>
-                <div className="text-xs text-gray-400 mb-3">
+              <div className="text-xs text-gray-400 mb-3">
                   {connectionStatus} • {participants.length + 1} in call
-                </div>
-                <div className="flex gap-2">
-                  <button
-                    onClick={toggleMute}
-                    className={`flex-1 px-3 py-2 rounded-lg text-xs font-medium transition-colors ${
-                      isMuted
-                        ? "bg-red-500/20 text-red-400 border border-red-500/30"
-                        : "bg-gray-800 text-gray-300 border border-gray-700"
-                    }`}
-                  >
-                    {isMuted ? "🔇 Unmute" : "🔊 Mute"}
-                  </button>
-                  <button
-                    onClick={handleLeaveCall}
-                    className="flex-1 px-3 py-2 rounded-lg bg-red-500/20 text-red-400 border border-red-500/30 text-xs font-medium hover:bg-red-500/30 transition-colors"
-                  >
-                    Leave
-                  </button>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={toggleMute}
+                  className={`flex-1 px-3 py-2 rounded-lg text-xs font-medium transition-colors ${
+                    isMuted
+                      ? "bg-red-500/20 text-red-400 border border-red-500/30"
+                      : "bg-gray-800 text-gray-300 border border-gray-700"
+                  }`}
+                >
+                  {isMuted ? "🔇 Unmute" : "🔊 Mute"}
+                </button>
+                <button
+                  onClick={handleLeaveCall}
+                  className="flex-1 px-3 py-2 rounded-lg bg-red-500/20 text-red-400 border border-red-500/30 text-xs font-medium hover:bg-red-500/30 transition-colors"
+                >
+                  Leave
+                </button>
                 </div>
               </div>
             </div>
@@ -2021,7 +2145,7 @@ export default function HomePage() {
             /* Voice Call Interface */
             <div className="h-full flex flex-col p-8">
               {/* Call Header */}
-              <div className="flex items-center justify-between mb-6">
+            <div className="flex items-center justify-between mb-6">
                 <div>
                   <div className="flex items-center gap-3">
                     <div className="w-3 h-3 bg-green-500 rounded-full animate-pulse"></div>
@@ -2069,7 +2193,7 @@ export default function HomePage() {
                         isVideoOn
                           ? "w-40 h-32 rounded-xl"
                           : "w-24 h-24 rounded-full"
-                      } flex items-center justify-center transition-all overflow-hidden ${
+                      } flex items-center justify-center transition-all ${
                         isMuted
                           ? "bg-gray-800 border-2 border-gray-600"
                           : isVideoOn
@@ -2083,7 +2207,7 @@ export default function HomePage() {
                           autoPlay
                           muted
                           playsInline
-                          className="w-full h-full object-cover"
+                          className="w-full h-full object-cover rounded-xl overflow-hidden"
                           style={{ transform: "scaleX(-1)" }}
                         />
                       ) : currentUser.avatar ? (
@@ -2104,9 +2228,9 @@ export default function HomePage() {
                       )}
                       {/* Muted indicator */}
                       {isMuted && (
-                        <div className="absolute bottom-1 right-1 w-6 h-6 bg-red-500 rounded-full flex items-center justify-center">
+                        <div className="absolute -bottom-1 -right-1 w-7 h-7 bg-red-500 rounded-full flex items-center justify-center shadow-lg">
                           <svg
-                            className="w-3.5 h-3.5 text-white"
+                            className="w-4 h-4 text-white"
                             fill="currentColor"
                             viewBox="0 0 24 24"
                           >
@@ -2116,9 +2240,9 @@ export default function HomePage() {
                       )}
                       {/* Deafened indicator */}
                       {isDeafened && (
-                        <div className="absolute bottom-1 left-1 w-6 h-6 bg-red-500 rounded-full flex items-center justify-center">
+                        <div className="absolute -bottom-1 -left-1 w-7 h-7 bg-red-500 rounded-full flex items-center justify-center shadow-lg">
                           <svg
-                            className="w-3.5 h-3.5 text-white"
+                            className="w-4 h-4 text-white"
                             fill="currentColor"
                             viewBox="0 0 24 24"
                           >
@@ -2129,9 +2253,9 @@ export default function HomePage() {
                       )}
                       {/* Video on indicator */}
                       {isVideoOn && (
-                        <div className="absolute top-1 right-1 w-6 h-6 bg-primary rounded-full flex items-center justify-center">
+                        <div className="absolute -top-1 -right-1 w-7 h-7 bg-primary rounded-full flex items-center justify-center shadow-lg">
                           <svg
-                            className="w-3.5 h-3.5 text-black"
+                            className="w-4 h-4 text-black"
                             fill="currentColor"
                             viewBox="0 0 24 24"
                           >
@@ -2333,32 +2457,123 @@ export default function HomePage() {
                   <h2 className="text-2xl font-bold neon-text-glow">
                     Study Rooms
                   </h2>
-                  <div className="text-sm text-gray-400">
-                    Browse study groups and voice rooms
+                  {/* User Search */}
+                  <div className="relative" ref={userSearchRef}>
+                    <div className="relative">
+                      <input
+                        type="text"
+                        value={userSearchQuery}
+                        onChange={(e) => handleUserSearchChange(e.target.value)}
+                        onFocus={() => {
+                          if (userSearchResults.length > 0) {
+                            setShowUserSearchResults(true);
+                          }
+                        }}
+                        placeholder="Search users..."
+                        className="w-64 px-4 py-2 pl-10 bg-gray-900 border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-primary transition-colors text-sm"
+                      />
+                      <svg
+                        className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+                        />
+                      </svg>
+                      {isSearchingUsers && (
+                        <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                          <svg
+                            className="w-4 h-4 text-gray-400 animate-spin"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                          >
+                            <circle
+                              className="opacity-25"
+                              cx="12"
+                              cy="12"
+                              r="10"
+                              stroke="currentColor"
+                              strokeWidth="4"
+                            ></circle>
+                            <path
+                              className="opacity-75"
+                              fill="currentColor"
+                              d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                            ></path>
+                          </svg>
+                        </div>
+                      )}
+                    </div>
+                    {/* Search Results Dropdown */}
+                    {showUserSearchResults && (
+                      <div className="absolute top-full mt-2 right-0 w-80 bg-gray-900 border border-gray-700 rounded-lg shadow-xl z-50 max-h-80 overflow-y-auto">
+                        {userSearchResults.length === 0 ? (
+                          <div className="p-4 text-center text-gray-400 text-sm">
+                            {userSearchQuery.trim().length < 2
+                              ? "Type at least 2 characters to search"
+                              : "No users found"}
+                          </div>
+                        ) : (
+                          <div className="py-2">
+                            <div className="px-3 py-1 text-xs text-gray-500 uppercase">
+                              Users ({userSearchResults.length})
+                            </div>
+                            {userSearchResults.map((user, index) => (
+                              <button
+                                key={index}
+                                onClick={() => openUserProfile(user)}
+                                className="w-full px-3 py-3 flex items-center gap-3 hover:bg-gray-800 transition-colors text-left"
+                              >
+                                <div className="w-10 h-10 rounded-full bg-gray-700 flex items-center justify-center flex-shrink-0">
+                                  <span className="text-sm font-medium text-primary">
+                                    {user.username.charAt(0).toUpperCase()}
+                                  </span>
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-sm font-medium text-white truncate">
+                                    {user.username}
+                                  </p>
+                                  {user.description && (
+                                    <p className="text-xs text-gray-400 truncate">
+                                      {user.description}
+                                    </p>
+                                  )}
+                                </div>
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                  {channels.map((c) => (
-                    <div
-                      key={c.id}
-                      className="p-4 bg-gradient-to-br from-gray-900/50 to-black border border-gray-800 rounded-lg hover:border-gray-700 transition-colors"
-                    >
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <div className="text-xs text-gray-400 uppercase">
-                              {c.type === "text" ? "Text" : "Voice"}
-                            </div>
-                            {c.privacy === "private" && (
-                              <span className="text-xs text-gray-500">🔒</span>
-                            )}
-                          </div>
+              {channels.map((c) => (
+                <div
+                  key={c.id}
+                  className="p-4 bg-gradient-to-br from-gray-900/50 to-black border border-gray-800 rounded-lg hover:border-gray-700 transition-colors"
+                >
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <div className="text-xs text-gray-400 uppercase">
+                          {c.type === "text" ? "Text" : "Voice"}
+                        </div>
+                        {c.privacy === "private" && (
+                          <span className="text-xs text-gray-500">🔒</span>
+                        )}
+                      </div>
                           <div className="font-semibold text-lg mt-1">
                             {c.name}
-                          </div>
-                        </div>
-                      </div>
+                    </div>
+                    </div>
+                  </div>
                       {c.course && (
                         <p className="text-sm text-gray-300 mt-3 flex items-center gap-2">
                           <svg
@@ -2392,8 +2607,8 @@ export default function HomePage() {
                           <span className="text-primary">{c.createdBy}</span>
                         </p>
                       )}
-                      {c.type === "voice" && (
-                        <button
+                  {c.type === "voice" && (
+                    <button
                           suppressHydrationWarning
                           onClick={() => handleJoinVoiceChannel(c)}
                           className="mt-3 w-full px-3 py-2 rounded-lg bg-primary/10 text-primary text-sm font-medium hover:bg-primary/20 transition-colors border border-primary/30"
@@ -2408,73 +2623,181 @@ export default function HomePage() {
                           className="mt-3 w-full px-3 py-2 rounded-lg bg-primary/10 text-primary text-sm font-medium hover:bg-primary/20 transition-colors border border-primary/30"
                         >
                           Open Chat
-                        </button>
-                      )}
-                    </div>
-                  ))}
+                    </button>
+                  )}
                 </div>
+              ))}
+            </div>
               </div>
             </div>
           )}
 
-          {/* Password Prompt Modal */}
-          {showPasswordPrompt && activeCall && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
-              <div className="w-full max-w-md p-6 bg-gradient-to-br from-[#041022] via-[#00131a] to-[#001f2b] border border-primary/30 rounded-xl shadow-[0_20px_60px_rgba(0,217,255,0.08)]">
-                <h3 className="text-xl font-semibold mb-4">
-                  Join Voice Channel
-                </h3>
-                <p className="text-sm text-gray-400 mb-4">
-                  This is a private voice channel. Enter the password to join.
-                </p>
-                <div className="mb-4">
-                  <label className="block text-sm text-gray-400 mb-2">
-                    Password
-                  </label>
-                  <input
-                    type="password"
-                    value={callPassword}
-                    onChange={(e) => {
-                      setCallPassword(e.target.value);
-                      setCallError(null);
-                    }}
-                    onKeyDown={(e) =>
-                      e.key === "Enter" && handlePasswordSubmit()
-                    }
-                    className="w-full px-3 py-2 bg-black border border-gray-700 rounded-lg text-sm focus:outline-none focus:border-primary transition-colors"
-                    placeholder="Enter password"
-                    autoFocus
-                  />
-                  {callError && (
-                    <div className="text-sm text-red-400 bg-red-400/10 border border-red-400/20 rounded-lg px-3 py-2 mt-2">
-                      {callError}
-                    </div>
-                  )}
-                </div>
-                <div className="flex justify-end gap-3">
-                  <button
-                    onClick={() => {
-                      setShowPasswordPrompt(false);
-                      setActiveCall(null);
-                      setCallPassword("");
-                      setCallError(null);
-                    }}
-                    className="px-4 py-2 rounded-lg bg-gray-800 text-sm font-medium hover:bg-gray-700 transition-colors"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    onClick={handlePasswordSubmit}
-                    className="px-4 py-2 rounded-lg bg-primary text-black text-sm font-medium hover:bg-accent transition-colors"
-                  >
-                    Join
-                  </button>
+            {/* Password Prompt Modal */}
+            {showPasswordPrompt && activeCall && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
+                <div className="w-full max-w-md p-6 bg-gradient-to-br from-[#041022] via-[#00131a] to-[#001f2b] border border-primary/30 rounded-xl shadow-[0_20px_60px_rgba(0,217,255,0.08)]">
+                  <h3 className="text-xl font-semibold mb-4">
+                    Join Voice Channel
+                  </h3>
+                  <p className="text-sm text-gray-400 mb-4">
+                    This is a private voice channel. Enter the password to join.
+                  </p>
+                  <div className="mb-4">
+                    <label className="block text-sm text-gray-400 mb-2">
+                      Password
+                    </label>
+                    <input
+                      type="password"
+                      value={callPassword}
+                      onChange={(e) => {
+                        setCallPassword(e.target.value);
+                        setCallError(null);
+                      }}
+                      onKeyDown={(e) =>
+                        e.key === "Enter" && handlePasswordSubmit()
+                      }
+                      className="w-full px-3 py-2 bg-black border border-gray-700 rounded-lg text-sm focus:outline-none focus:border-primary transition-colors"
+                      placeholder="Enter password"
+                      autoFocus
+                    />
+                    {callError && (
+                      <div className="text-sm text-red-400 bg-red-400/10 border border-red-400/20 rounded-lg px-3 py-2 mt-2">
+                        {callError}
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex justify-end gap-3">
+                    <button
+                      onClick={() => {
+                        setShowPasswordPrompt(false);
+                        setActiveCall(null);
+                        setCallPassword("");
+                        setCallError(null);
+                      }}
+                      className="px-4 py-2 rounded-lg bg-gray-800 text-sm font-medium hover:bg-gray-700 transition-colors"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={handlePasswordSubmit}
+                      className="px-4 py-2 rounded-lg bg-primary text-black text-sm font-medium hover:bg-accent transition-colors"
+                    >
+                      Join
+                    </button>
+                  </div>
                 </div>
               </div>
-            </div>
-          )}
+            )}
         </main>
       </div>
+
+      {/* User Profile Modal */}
+      {(selectedUserProfile || isLoadingProfile) && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+          <div className="bg-gray-900 border border-gray-700 rounded-2xl w-full max-w-md overflow-hidden">
+            {isLoadingProfile ? (
+              <div className="p-8 flex items-center justify-center">
+                <svg
+                  className="w-8 h-8 text-primary animate-spin"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                >
+                  <circle
+                    className="opacity-25"
+                    cx="12"
+                    cy="12"
+                    r="10"
+                    stroke="currentColor"
+                    strokeWidth="4"
+                  ></circle>
+                  <path
+                    className="opacity-75"
+                    fill="currentColor"
+                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                  ></path>
+                </svg>
+              </div>
+            ) : selectedUserProfile ? (
+              <>
+                {/* Header with close button */}
+                <div className="relative">
+                  <div className="h-24 bg-gradient-to-r from-primary/30 to-accent/30"></div>
+                  <button
+                    onClick={closeUserProfile}
+                    className="absolute top-3 right-3 p-2 rounded-full bg-black/50 hover:bg-black/70 transition-colors"
+                  >
+                    <svg
+                      className="w-5 h-5 text-white"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M6 18L18 6M6 6l12 12"
+                      />
+                    </svg>
+                  </button>
+                  {/* Avatar */}
+                  <div className="absolute -bottom-12 left-6">
+                    <div className="w-24 h-24 rounded-full bg-gray-800 border-4 border-gray-900 flex items-center justify-center">
+                      <span className="text-3xl font-bold text-primary">
+                        {selectedUserProfile.username.charAt(0).toUpperCase()}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Profile Content */}
+                <div className="pt-14 px-6 pb-6">
+                  {/* Username */}
+                  <h3 className="text-xl font-bold text-white">
+                    {selectedUserProfile.username}
+                  </h3>
+
+                  {/* Description */}
+                  <div className="mt-4">
+                    <p className="text-sm text-gray-500 uppercase tracking-wide mb-1">
+                      About
+                    </p>
+                    <p className="text-gray-300">
+                      {selectedUserProfile.description || (
+                        <span className="text-gray-500 italic">
+                          This Mav has no description
+                        </span>
+                      )}
+                    </p>
+                  </div>
+
+                  {/* Member Since */}
+                  <div className="mt-4 pt-4 border-t border-gray-800">
+                    <div className="flex items-center gap-2 text-sm text-gray-400">
+                      <svg
+                        className="w-4 h-4"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"
+                        />
+                      </svg>
+                      <span>
+                        Member since {formatJoinDate(selectedUserProfile.createdAt)}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </>
+            ) : null}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

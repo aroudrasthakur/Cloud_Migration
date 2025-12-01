@@ -55,7 +55,7 @@ export default async function handler(
     }
   } else if (req.method === "POST") {
     // Reserve a username for a user
-    const { username, userId, email } = req.body;
+    const { username, userId, email, description } = req.body;
 
     if (!username || !userId || !email) {
       return res.status(400).json({ error: "Username, userId, and email are required" });
@@ -66,6 +66,14 @@ export default async function handler(
     if (!usernameRegex.test(username)) {
       return res.status(400).json({ 
         error: "Username must be 3-20 characters, alphanumeric and underscores only" 
+      });
+    }
+
+    // Validate description length if provided
+    const DESCRIPTION_MAX_LENGTH = 50;
+    if (description && description.length > DESCRIPTION_MAX_LENGTH) {
+      return res.status(400).json({ 
+        error: `Description must be ${DESCRIPTION_MAX_LENGTH} characters or less` 
       });
     }
 
@@ -86,7 +94,7 @@ export default async function handler(
         return res.status(409).json({ error: "Username is already taken" });
       }
 
-      // Reserve the username
+      // Reserve the username with profile data
       const putParams = {
         TableName: TABLE_NAME,
         Item: {
@@ -95,6 +103,7 @@ export default async function handler(
           username: username,
           userId: userId,
           email: email,
+          description: description || "",
           createdAt: new Date().toISOString(),
         },
         ConditionExpression: "attribute_not_exists(PK)",
