@@ -1,0 +1,18 @@
+version: 1
+frontend:
+  phases:
+    preBuild:
+      commands:
+        - cd mavprep-landing
+        - npm ci
+    build:
+      commands:
+        - npm run build
+  artifacts:
+    baseDirectory: mavprep-landing
+    files:
+      - "**/*"
+  cache:
+    paths:
+      - mavprep-landing/node_modules/**/*
+      - mavprep-landing/.next/cache/**/*
